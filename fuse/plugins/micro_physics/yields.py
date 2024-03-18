@@ -168,7 +168,7 @@ class NestYields(FuseBasePlugin):
 
 
 @export
-class BetaYields(strax.Plugin):
+class BetaYields(FuseBasePlugin):
 
     __version__ = "1.0.0"
 
@@ -177,9 +177,9 @@ class BetaYields(strax.Plugin):
     data_kind = "interactions_in_roi"
 
     dtype = [
-        ("photons", np.int32),
-        ("electrons", np.int32),
-        ("excitons", np.int32),
+        (("Number of photons at interaction position.", "photons"), np.int32),
+        (("Number of electrons at interaction position.", "electrons"), np.int32),
+        (("Number of excitons at interaction position.", "excitons"), np.int32),
     ]
 
     dtype = dtype + strax.time_fields
@@ -224,28 +224,17 @@ class BetaYields(strax.Plugin):
         help="Set the random seed from lineage and run_id, or pull the seed from the OS.",
     )
 
-
     def setup(self):
         super().setup()
-        
-        if self.debug:
-            log.setLevel("DEBUG")
-            log.debug(f"Running BetaYields version {self.__version__} in debug mode")
-        else:
-            log.setLevel("WARNING")
-
-        log.debug(f"Using nestpy version {nestpy.__version__}")
 
         if self.deterministic_seed:
-            hash_string = strax.deterministic_hash((self.run_id, self.lineage))
-            seed = int(hash_string.encode().hex(), 16)
             # Dont know but nestpy seems to have a problem with large seeds
-            self.short_seed = int(repr(seed)[-8:])
-            nest_rng.set_seed(self.short_seed)
-
-            log.debug(f"Generating random numbers from seed {self.short_seed}")
+            self.short_seed = int(repr(self.seed)[-8:])
+            log.debug(f"Generating nest random numbers starting with seed {self.short_seed}")
         else:
             log.debug("Generating random numbers with seed pulled from OS")
+
+        self.quanta_from_NEST = np.vectorize(self._quanta_from_NEST)
 
         self.get_quanta_vectorized = np.vectorize(self.get_quanta, excluded="self")
 

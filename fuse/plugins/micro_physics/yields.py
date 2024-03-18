@@ -167,8 +167,10 @@ class NestYields(FuseBasePlugin):
         return photons, electrons, excitons
 
 
+@export
 class BetaYields(strax.Plugin):
-    __version__ = "0.1.1"
+
+    __version__ = "1.0.0"
 
     depends_on = ["interactions_in_roi", "electric_field_values"]
     provides = "quanta"
@@ -222,7 +224,10 @@ class BetaYields(strax.Plugin):
         help="Set the random seed from lineage and run_id, or pull the seed from the OS.",
     )
 
+
     def setup(self):
+        super().setup()
+        
         if self.debug:
             log.setLevel("DEBUG")
             log.debug(f"Running BetaYields version {self.__version__} in debug mode")

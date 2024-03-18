@@ -187,13 +187,6 @@ class BetaYields(FuseBasePlugin):
     # Forbid rechunking
     rechunk_on_save = False
 
-    # Config options
-    debug = straxen.URLConfig(
-        default=False,
-        type=bool,
-        help="Show debug informations",
-    )
-
     use_recombination_fluctuation = straxen.URLConfig(
         default=True,
         type=bool,

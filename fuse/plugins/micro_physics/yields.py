@@ -221,8 +221,6 @@ class BetaYields(FuseBasePlugin):
         else:
             log.debug("Generating random numbers with seed pulled from OS")
 
-        self.quanta_from_NEST = np.vectorize(self._quanta_from_NEST)
-
         self.get_quanta_vectorized = np.vectorize(self.get_quanta, excluded="self")
 
         # This can be moved into an URLConfig protocol before merging the PR!

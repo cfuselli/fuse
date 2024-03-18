@@ -230,8 +230,6 @@ class BetaYields(FuseBasePlugin):
             self.cs2_spline = pickle.load(f)
 
         self.nc = nestpy.NESTcalc(nestpy.DetectorExample_XENON10())
-        for i in range(self.rng.randint(100)):
-            self.nc.GetQuanta(self.nc.GetYields(energy=np.random.uniform(10, 100)))
 
     def compute(self, interactions_in_roi):
         """Computes the charge and light quanta for a list of clustered

@@ -211,12 +211,6 @@ class BetaYields(FuseBasePlugin):
         help="cs2_spline_path",
     )
 
-    deterministic_seed = straxen.URLConfig(
-        default=True,
-        type=bool,
-        help="Set the random seed from lineage and run_id, or pull the seed from the OS.",
-    )
-
     def setup(self):
         super().setup()
 

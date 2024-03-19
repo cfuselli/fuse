@@ -189,6 +189,12 @@ class BetaYields(NestYields):
         help="use_recombination_fluctuation",
     )
 
+    recombination_fluctuation_std_factor = straxen.URLConfig(
+        default=3,
+        type=(int, float),
+        help="A factor that is defined to guess the recombination fluctuation",
+    )
+
     g1_value = straxen.URLConfig(
         type=(int, float),
         help="g1",
@@ -248,7 +254,8 @@ class BetaYields(NestYields):
 
         if self.use_recombination_fluctuation:
 
-            rf = self.rng.normal(0, energy * 3.0, len(energy))
+            factor = self.recombination_fluctuation_std_factor
+            rf = self.rng.normal(0, energy * factor, len(energy))
             beta_photons += rf
             beta_electrons -= rf
 

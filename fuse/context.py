@@ -12,18 +12,21 @@ import fuse
 logging.basicConfig(handlers=[logging.StreamHandler()])
 log = logging.getLogger("fuse.context")
 
-# Plugins to simulate microphysics
-microphysics_plugins = [
-    fuse.micro_physics.ChunkInput,
-    fuse.micro_physics.FindCluster,
-    fuse.micro_physics.MergeCluster,
-    fuse.micro_physics.XENONnT_TPC,
-    fuse.micro_physics.XENONnT_BelowCathode,
-    fuse.micro_physics.VolumesMerger,
-    fuse.micro_physics.ElectricField,
-    fuse.micro_physics.NestYields,
-    fuse.micro_physics.MicroPhysicsSummary,
-]
+#Plugins to simulate microphysics
+microphysics_plugins_dbscan_clustering = [fuse.micro_physics.ChunkInput,
+                                          fuse.micro_physics.FindCluster,
+                                          fuse.micro_physics.MergeCluster]
+
+microphysics_plugins_lineage_clustering = [fuse.micro_physics.ChunkInput,
+                                           fuse.micro_physics.LineageClustering,
+                                           fuse.micro_physics.MergeLineage]
+
+remaining_microphysics_plugins = [fuse.micro_physics.XENONnT_TPC,
+                                  fuse.micro_physics.XENONnT_BelowCathode,
+                                  fuse.micro_physics.VolumesMerger,
+                                  fuse.micro_physics.ElectricField,
+                                  fuse.micro_physics.NestYields,
+                                  fuse.micro_physics.MicroPhysicsSummary]
 
 # Plugins to simulate S1 signals
 s1_simulation_plugins = [
@@ -77,53 +80,39 @@ def microphysics_context(output_folder="./fuse_data"):
 
     return st
 
+def full_chain_context(output_folder = "./fuse_data",
+                       clustering_method = "dbscan",
+                       corrections_version = None,
+                       simulation_config_file = "fax_config_nt_design.json",
+                       corrections_run_id = "026000",
+                       run_id_specific_config = {"gain_model_mc":"gain_model",
+                                                 "electron_lifetime_liquid":"elife",
+                                                 "drift_velocity_liquid":"electron_drift_velocity",
+                                                 "drift_time_gate":"electron_drift_time_gate",
+                                                 }
+                       ):
+    """
+    Function to create a fuse full chain simulation context. 
+    """
 
-def full_chain_context(
-    output_folder="./fuse_data",
-    corrections_version=None,
-    simulation_config_file="fax_config_nt_design.json",
-    corrections_run_id="026000",
-    run_id_specific_config={
-        "gain_model_mc": "gain_model",
-        "electron_lifetime_liquid": "elife",
-        "drift_velocity_liquid": "electron_drift_velocity",
-        "drift_time_gate": "electron_drift_time_gate",
-    },
-    run_without_proper_corrections=False,
-):
-    """Function to create a fuse full chain simulation context."""
+    st = strax.Context(storage=strax.DataDirectory(output_folder),
+                       **straxen.contexts.xnt_common_opts)
+    
+    st.config.update(dict(#detector='XENONnT',
+                          check_raw_record_overlaps=True,
+                          **straxen.contexts.xnt_common_config))
 
-    if corrections_run_id is None:
-        raise ValueError("Specify a corrections_run_id to load the corrections")
-    if (corrections_version is None) & (not run_without_proper_corrections):
-        raise ValueError(
-            "Specify a corrections_version. If you want to run without proper "
-            "corrections for testing or just trying out fuse, "
-            "set run_without_proper_corrections to True"
-        )
-    if simulation_config_file is None:
-        raise ValueError("Specify a simulation configuration file")
-
-    if run_without_proper_corrections:
-        log.warning(
-            "Running without proper correction version. This is not recommended for production use."
-            "Take the context defined in cutax if you want to run XENONnT simulations."
-        )
-
-    st = strax.Context(
-        storage=strax.DataDirectory(output_folder), **straxen.contexts.xnt_common_opts
-    )
-
-    st.config.update(
-        dict(
-            # detector='XENONnT',
-            check_raw_record_overlaps=True,
-            **straxen.contexts.xnt_common_config,
-        )
-    )
-
-    # Register microphysics plugins
-    for plugin in microphysics_plugins:
+    #Register microphysics plugins
+    if clustering_method == "dbscan":
+        for plugin in microphysics_plugins_dbscan_clustering:
+            st.register(plugin)
+    elif clustering_method == "lineage":
+        for plugin in microphysics_plugins_lineage_clustering:
+            st.register(plugin)
+    else:
+        raise ValueError(f"Clustering method {clustering_method} not implemented!")
+    
+    for plugin in remaining_microphysics_plugins:
         st.register(plugin)
 
     # Register S1 plugins
@@ -165,9 +154,6 @@ def full_chain_context(
 
     # No blinding in simulations
     st.config["event_info_function"] = "disabled"
-
-    # Deregister plugins with missing dependencies
-    st.deregister_plugins_with_missing_dependencies()
 
     return st
 

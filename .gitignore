@@ -5,6 +5,7 @@ build/*
 .vscode/*
 docs/build/*
 resource_cache
+.ipynb_checkpoints
 .coverage
 .hypothesis
 .DS_Store

@@ -222,6 +222,8 @@ class BetaYields(NestYields):
 
         mask_beta = interactions_in_roi["nestid"] == 8
 
+        print("We are using the beta yields")
+
         # now for the beta interactions we use the beta yields
         photons_beta, electrons_beta = self.quanta_from_spline(
             interactions_in_roi["ed"][mask_beta],
@@ -261,6 +263,7 @@ class BetaYields(NestYields):
         return beta_photons, beta_electrons
 
 
+@export
 class BBFYields(FuseBasePlugin):
     __version__ = "0.1.1"
 

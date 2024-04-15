@@ -32,18 +32,19 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
     Note: The timing calculation is defined in the child plugin.
     """
 
-    __version__ = "0.3.0"
+    __version__ = "0.3.3"
 
     depends_on = (
-        "electron_time",
-        "s2_photons",
-        "extracted_electrons",
-        "drifted_electrons",
-        "s2_photons_sum",
-        "microphysics_summary",
+        "merged_electron_time",
+        "merged_s2_photons",
+        "merged_extracted_electrons",
+        "merged_drifted_electrons",
+        "merged_s2_photons_sum",
+        "merged_microphysics_summary",
     )
+
     provides = "propagated_s2_photons"
-    data_kind = "S2_photons"
+    data_kind = "s2_photons"
 
     save_when = strax.SaveWhen.TARGET
 
@@ -140,15 +141,6 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
         help="Phase of the S2 producing region",
     )
 
-    drift_velocity_liquid = straxen.URLConfig(
-        default="take://resource://"
-        "SIMULATION_CONFIG_FILE.json?&fmt=json"
-        "&take=drift_velocity_liquid",
-        type=(int, float),
-        cache=True,
-        help="Drift velocity of electrons in the liquid xenon [cm/ns]",
-    )
-
     tpc_length = straxen.URLConfig(
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=tpc_length",
         type=(int, float),
@@ -188,12 +180,24 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
         help="Width of the S2 area fraction top",
     )
 
-    enable_field_dependencies = straxen.URLConfig(
+    enable_diffusion_transverse_map = straxen.URLConfig(
         default="take://resource://"
         "SIMULATION_CONFIG_FILE.json?&fmt=json"
-        "&take=enable_field_dependencies",
+        "&take=enable_diffusion_transverse_map",
+        type=bool,
         cache=True,
-        help="Field dependencies during electron drift",
+        help="Use transverse diffusion map from field_dependencies_map_tmp",
+    )
+
+    # stupid naming problem...
+    field_dependencies_map_tmp = straxen.URLConfig(
+        default="itp_map://resource://simulation_config://"
+        "SIMULATION_CONFIG_FILE.json?"
+        "&key=field_dependencies_map"
+        "&fmt=json.gz"
+        "&method=WeightedNearestNeighbors",
+        cache=True,
+        help="Map for the electric field dependencies",
     )
 
     s2_mean_area_fraction_top = straxen.URLConfig(
@@ -216,17 +220,6 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
         "&n_top_pmts=plugin.n_top_pmts",
         cache=True,
         help="S2 pattern map",
-    )
-
-    # stupid naming problem...
-    field_dependencies_map_tmp = straxen.URLConfig(
-        default="itp_map://resource://simulation_config://"
-        "SIMULATION_CONFIG_FILE.json?"
-        "&key=field_dependencies_map"
-        "&fmt=json.gz"
-        "&method=WeightedNearestNeighbors",
-        cache=True,
-        help="Map for the electric field dependencies",
     )
 
     singlet_fraction_gas = straxen.URLConfig(
@@ -317,19 +310,8 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
             self.photon_area_distribution
         )
 
-        # Move this part into a nice URLConfig protocol?
         # Field dependencies
-        if any(self.enable_field_dependencies.values()):
-            self.drift_velocity_scaling = 1.0
-            # calculating drift velocity scaling to match total drift time
-            # for R = 0 between cathode and gate
-            if "norm_drift_velocity" in self.enable_field_dependencies.keys():
-                if self.enable_field_dependencies["norm_drift_velocity"]:
-                    norm_dvel = self.field_dependencies_map_tmp(
-                        np.array([[0], [-self.tpc_length]]).T, map_name="drift_speed_map"
-                    )[0]
-                    norm_dvel *= 1e-4
-                    self.drift_velocity_scaling = self.drift_velocity_liquid / norm_dvel
+        if self.enable_diffusion_transverse_map:
 
             def rz_map(z, xy, **kwargs):
                 r = np.sqrt(xy[:, 0] ** 2 + xy[:, 1] ** 2)
@@ -337,7 +319,7 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
 
             self.field_dependencies_map = rz_map
 
-    def compute(self, individual_electrons, interactions_in_roi, start, end):
+    def compute(self, interactions_in_roi, individual_electrons, start, end):
         # Just apply this to clusters with photons
         mask = interactions_in_roi["n_electron_extracted"] > 0
 
@@ -366,69 +348,7 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
         last_start = start
         if n_chunks > 1:
             for electron_group in electron_chunks[:-1]:
-                unique_clusters_in_group = np.unique(electron_group["cluster_id"])
-                interactions_chunk = interactions_in_roi[mask][
-                    np.isin(interactions_in_roi["cluster_id"][mask], unique_clusters_in_group)
-                ]
-
-                # Sort both the interactions and the electrons by cluster_id
-                # We will later sort by time again when yielding the data.
-                sort_index_ic = np.argsort(interactions_chunk["cluster_id"])
-                sort_index_eg = np.argsort(electron_group["cluster_id"])
-                interactions_chunk = interactions_chunk[sort_index_ic]
-                electron_group = electron_group[sort_index_eg]
-
-                positions = np.array([interactions_chunk["x_obs"], interactions_chunk["y_obs"]]).T
-
-                _photon_channels = self.photon_channels(
-                    interactions_chunk["n_electron_extracted"],
-                    interactions_chunk["z_obs"],
-                    positions,
-                    interactions_chunk["drift_time_mean"],
-                    interactions_chunk["sum_s2_photons"],
-                )
-
-                _photon_timings = self.photon_timings(
-                    positions,
-                    interactions_chunk["sum_s2_photons"],
-                    _photon_channels,
-                )
-
-                # Repeat for n photons per electron # Should this be before adding delays?
-                _photon_timings += np.repeat(electron_group["time"], electron_group["n_s2_photons"])
-
-                _cluster_id = np.repeat(
-                    interactions_chunk["cluster_id"], interactions_chunk["sum_s2_photons"]
-                )
-
-                # Do i want to save both -> timings with and without pmt transit time spread?
-                # Correct for PMT Transit Time Spread
-                _photon_timings = pmt_transit_time_spread(
-                    _photon_timings=_photon_timings,
-                    pmt_transit_time_mean=self.pmt_transit_time_mean,
-                    pmt_transit_time_spread=self.pmt_transit_time_spread,
-                    rng=self.rng,
-                )
-
-                _photon_gains, _photon_is_dpe = photon_gain_calculation(
-                    _photon_channels=_photon_channels,
-                    p_double_pe_emision=self.p_double_pe_emision,
-                    gains=self.gains,
-                    spe_scaling_factor_distributions=self.spe_scaling_factor_distributions,
-                    rng=self.rng,
-                )
-
-                result = build_photon_propagation_output(
-                    dtype=self.dtype,
-                    _photon_timings=_photon_timings,
-                    _photon_channels=_photon_channels,
-                    _photon_gains=_photon_gains,
-                    _photon_is_dpe=_photon_is_dpe,
-                    _cluster_id=_cluster_id,
-                    photon_type=2,
-                )
-
-                result = strax.sort_by_time(result)
+                result = self.compute_chunk(interactions_in_roi, mask, electron_group)
 
                 # Move the chunk bound 90% of the minimal gap length to
                 # the next photon to make space for afterpluses
@@ -441,11 +361,19 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
 
         # And the last chunk
         electron_group = electron_chunks[-1]
+        result = self.compute_chunk(interactions_in_roi, mask, electron_group)
+
+        chunk = self.chunk(start=last_start, end=end, data=result)
+        yield chunk
+
+    def compute_chunk(self, interactions_in_roi, mask, electron_group):
         unique_clusters_in_group = np.unique(electron_group["cluster_id"])
         interactions_chunk = interactions_in_roi[mask][
             np.isin(interactions_in_roi["cluster_id"][mask], unique_clusters_in_group)
         ]
 
+        # Sort both the interactions and the electrons by cluster_id
+        # We will later sort by time again when yielding the data.
         sort_index_ic = np.argsort(interactions_chunk["cluster_id"])
         sort_index_eg = np.argsort(electron_group["cluster_id"])
         interactions_chunk = interactions_chunk[sort_index_ic]
@@ -465,14 +393,17 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
             positions,
             interactions_chunk["sum_s2_photons"],
             _photon_channels,
-        )
+        ).astype(np.int64)
 
+        # Repeat for n photons per electron # Should this be before adding delays?
         _photon_timings += np.repeat(electron_group["time"], electron_group["n_s2_photons"])
 
         _cluster_id = np.repeat(
             interactions_chunk["cluster_id"], interactions_chunk["sum_s2_photons"]
         )
 
+        # Do i want to save both -> timings with and without pmt transit time spread?
+        # Correct for PMT Transit Time Spread
         _photon_timings = pmt_transit_time_spread(
             _photon_timings=_photon_timings,
             pmt_transit_time_mean=self.pmt_transit_time_mean,
@@ -500,8 +431,7 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
 
         result = strax.sort_by_time(result)
 
-        chunk = self.chunk(start=last_start, end=end, data=result)
-        yield chunk
+        return result
 
     def photon_channels(self, n_electron, z_obs, positions, drift_time_mean, n_photons):
         channels = np.arange(self.n_tpc_pmts).astype(np.int64)
@@ -573,7 +503,7 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
         """
         assert all(z < 0), "All S2 in liquid should have z < 0"
 
-        if self.enable_field_dependencies["diffusion_transverse_map"]:
+        if self.enable_diffusion_transverse_map:
             diffusion_constant_radial = self.field_dependencies_map(
                 z, xy, map_name="diffusion_radial_map"
             )  # cm²/s
@@ -583,7 +513,6 @@ class S2PhotonPropagationBase(FuseBaseDownChunkingPlugin):
             diffusion_constant_radial *= 1e-9  # cm²/ns
             diffusion_constant_azimuthal *= 1e-9  # cm²/ns
         else:
-            # diffusion_constant_transverse = diffusion_constant_transverse
             diffusion_constant_radial = self.diffusion_constant_transverse
             diffusion_constant_azimuthal = self.diffusion_constant_transverse
 
@@ -761,14 +690,14 @@ class S2PhotonPropagationSimple(S2PhotonPropagationBase):
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=pressure",
         type=(int, float),
         cache=True,
-        help="pressure",
+        help="Pressure of liquid xenon [bar/e], while e is the elementary charge",
     )
 
     temperature = straxen.URLConfig(
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=temperature",
         type=(int, float),
         cache=True,
-        help="temperature",
+        help="Temperature of liquid xenon [K]",
     )
 
     gas_drift_velocity_slope = straxen.URLConfig(
@@ -784,7 +713,7 @@ class S2PhotonPropagationSimple(S2PhotonPropagationBase):
         default="take://resource://"
         "SIMULATION_CONFIG_FILE.json?&fmt=json"
         "&take=enable_gas_gap_warping",
-        type=(int, float),
+        type=bool,
         cache=True,
         help="enable_gas_gap_warping",
     )
@@ -831,14 +760,14 @@ class S2PhotonPropagationSimple(S2PhotonPropagationBase):
         "&take=gate_to_anode_distance",
         type=(int, float),
         cache=True,
-        help="gate_to_anode_distance",
+        help="Top of gate to bottom of anode (not considering perpendicular wires) [cm]",
     )
 
     anode_voltage = straxen.URLConfig(
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=anode_voltage",
         type=(int, float),
         cache=True,
-        help="anode_voltage",
+        help="Voltage of anode [V]",
     )
 
     lxe_dielectric_constant = straxen.URLConfig(
@@ -857,7 +786,7 @@ class S2PhotonPropagationSimple(S2PhotonPropagationBase):
         "&fmt=json.gz"
         "&method=RegularGridInterpolator",
         cache=True,
-        help="s2_optical_propagation_spline",
+        help="Spline for the optical propagation of S2 signals",
     )
 
     def setup(self):

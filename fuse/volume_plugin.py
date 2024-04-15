@@ -3,6 +3,7 @@ import numba
 import numpy as np
 
 from .plugin import FuseBasePlugin
+from .shared_dtypes import clustered_interactions_dtype
 
 
 class VolumePlugin(FuseBasePlugin):
@@ -13,6 +14,16 @@ class VolumePlugin(FuseBasePlugin):
 
     def setup(self):
         super().setup()
+
+    # Forbid rechunking
+    rechunk_on_save = False
+
+    __version__ = "0.0.1"
+
+    def infer_dtype(self):
+        dtype = clustered_interactions_dtype
+
+        return dtype
 
     def in_ROI(self, interactions, min_z, max_z, max_r):
         """Function that evaluates if an interaction is in the ROI."""

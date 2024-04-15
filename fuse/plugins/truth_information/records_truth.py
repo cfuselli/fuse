@@ -12,9 +12,9 @@ export, __all__ = strax.exporter()
 class RecordsTruth(strax.Plugin):
     """Plugin that computes the truth information for raw_records."""
 
-    __version__ = "0.0.1"
+    __version__ = "0.0.2"
 
-    depends_on = ("raw_records", "photon_summary")
+    depends_on = ("photon_summary", "raw_records")
     provides = "records_truth"
 
     dtype = [
@@ -38,7 +38,7 @@ class RecordsTruth(strax.Plugin):
         "&take=pmt_circuit_load_resistor",
         type=(int, float),
         cache=True,
-        help="PMT circuit load resistor",
+        help="PMT circuit load resistor [kg m^2/(s^3 A)]",
     )
 
     digitizer_bits = straxen.URLConfig(
@@ -54,7 +54,7 @@ class RecordsTruth(strax.Plugin):
         "&take=digitizer_voltage_range",
         type=(int, float),
         cache=True,
-        help="Voltage range of the digitizer boards",
+        help="Voltage range of the digitizer boards [V]",
     )
 
     def setup(self):
@@ -67,7 +67,7 @@ class RecordsTruth(strax.Plugin):
             pmt_circuit_load_resistor=self.pmt_circuit_load_resistor,
         )
 
-    def compute(self, raw_records, propagated_photons):
+    def compute(self, propagated_photons, raw_records):
         result = np.zeros(len(raw_records), dtype=self.dtype)
         result["time"] = raw_records["time"]
         result["length"] = raw_records["length"]

@@ -27,7 +27,7 @@ class ChunkInput(FuseBasePlugin):
     and will create multiple chunks of data if needed.
     """
 
-    __version__ = "0.3.1"
+    __version__ = "0.3.2"
 
     depends_on: Tuple = tuple()
     provides = "geant4_interactions"
@@ -45,11 +45,11 @@ class ChunkInput(FuseBasePlugin):
         (("Particle type of the parent particle", "parenttype"), "<U18"),
         (("Trackid of the parent particle", "parentid"), np.int16),
         (("Geant4 process creating the particle", "creaproc"), "<U25"),
-        (("Geant4 process destroying the particle", "edproc"), "<U25"),
+        (("Geant4 process responsible for the energy deposit", "edproc"), "<U25"),
         (("Geant4 event ID", "evtid"), np.int32),
-        (("x position of the primary particle", "x_pri"), np.float32),
-        (("y position of the primary particle", "y_pri"), np.float32),
-        (("z position of the primary particle", "z_pri"), np.float32),
+        (("x position of the primary particle [cm]", "x_pri"), np.float32),
+        (("y position of the primary particle [cm]", "y_pri"), np.float32),
+        (("z position of the primary particle [cm]", "z_pri"), np.float32),
     ]
 
     dtype = dtype + strax.time_fields
@@ -86,7 +86,7 @@ class ChunkInput(FuseBasePlugin):
     cut_delayed = straxen.URLConfig(
         default=9e18,
         type=(int, float),
-        help="All interactions happening after this time (including the event time) will be cut.",
+        help="All interactions happening after this time (including the event time) will be cut",
     )
 
     n_interactions_per_chunk = straxen.URLConfig(
@@ -98,12 +98,12 @@ class ChunkInput(FuseBasePlugin):
     entry_start = straxen.URLConfig(
         default=0,
         type=(int, float),
-        help="Geant4 event to start simulation from.",
+        help="Geant4 event to start simulation from",
     )
 
     entry_stop = straxen.URLConfig(
         default=None,
-        help="Geant4 event to stop simulation at. If None, all events are simulated.",
+        help="Geant4 event to stop simulation at. If None, all events are simulated",
     )
 
     cut_by_eventid = straxen.URLConfig(
@@ -244,7 +244,7 @@ class file_loader:
             (("Particle type of the parent particle", "parenttype"), "<U18"),
             (("Trackid of the parent particle", "parentid"), np.int16),
             (("Geant4 process creating the particle", "creaproc"), "<U25"),
-            (("Geant4 process destroying the particle", "edproc"), "<U25"),
+            (("Geant4 process responsible for the energy deposit", "edproc"), "<U25"),
             (("Geant4 event ID", "evtid"), np.int32),
             (("x position of the primary particle", "x_pri"), np.float32),
             (("y position of the primary particle", "y_pri"), np.float32),
@@ -266,8 +266,7 @@ class file_loader:
             )
 
         # Removing all events with zero energy deposit
-        m = interactions["ed"] > 0
-        interactions = interactions[m]
+        # m = interactions["ed"] > 0
 
         if self.cut_nr_only:
             log.info("'nr_only' set to True, keeping only the NR events")
@@ -280,6 +279,9 @@ class file_loader:
 
         # Removing all events with no interactions:
         m = ak.num(interactions["ed"]) > 0
+        # and all events with no deposited energy
+        m = m & (ak.sum(interactions["ed"], axis=1) > 0)
+
         interactions = interactions[m]
 
         # Sort interactions in events by time and subtract time of the first interaction
@@ -317,7 +319,7 @@ class file_loader:
         # Remove interactions that happen way after the run ended
         delay_cut = inter_reshaped["t"] <= self.cut_delayed
         log.info(
-            f"Removing {np.sum(~delay_cut)} ({np.sum(~delay_cut)/len(delay_cut) * 100:.4%}) "
+            f"Removing {np.sum(~delay_cut)} ({np.sum(~delay_cut)/len(delay_cut):.4%}) "
             f"interactions later than {self.cut_delayed:.2e} ns."
         )
         inter_reshaped = inter_reshaped[delay_cut]
@@ -393,36 +395,58 @@ class file_loader:
             if self.entry_stop is not None:
                 log.debug(f"Ending read in at {cutby_string} {self.entry_stop}")
 
+        if self.entry_start is not None and self.entry_stop is not None:
+            if self.entry_start >= self.entry_stop:
+                raise ValueError(
+                    "The requested range is not valid! "
+                    "Make sure that entry_stop is larger than entry_start"
+                )
+
         # If we cut by eventid we have to read all of them first to find the start and stop index
         if self.cut_by_eventid:
             all_eventids = ttree.arrays("eventid")
 
             if self.entry_start is not None:
-                start_index = np.argmax(all_eventids["eventid"] >= self.entry_start)
-            else:
-                start_index = 0
-
-            if self.entry_stop is not None:
-                stop_index = np.argmin(all_eventids["eventid"] < self.entry_stop)
-                if stop_index == 0:
+                if self.entry_start > np.max(all_eventids["eventid"]):
                     raise ValueError(
-                        "The requested eventid range is not in the file!"
+                        "The requested eventid range is not in the file! "
                         "Maybe you want to set cut_by_eventid to False?"
                     )
-            else:
-                stop_index = n_simulated_events
-        else:
-            if self.entry_start is not None:
-                start_index = self.entry_start
+                start_index = np.searchsorted(all_eventids["eventid"], self.entry_start)
             else:
                 start_index = 0
 
             if self.entry_stop is not None:
-                stop_index = self.entry_stop
+                if self.entry_stop <= np.min(all_eventids["eventid"]):
+                    raise ValueError(
+                        "The requested eventid range is not in the file! "
+                        "Maybe you want to set cut_by_eventid to False?"
+                    )
+                stop_index = np.searchsorted(all_eventids["eventid"], self.entry_stop)
             else:
                 stop_index = n_simulated_events
 
+        else:
+            entries = len(ttree.arrays("eventid"))
+            if self.entry_start is not None:
+                if self.entry_start > entries:
+                    raise ValueError("The requested entry range is not in the file!")
+                start_index = max(0, self.entry_start)
+            else:
+                start_index = 0
+
+            if self.entry_stop is not None:
+                if self.entry_stop < 0:
+                    raise ValueError("The requested entry range is not in the file!")
+                stop_index = min(self.entry_stop, entries)
+            else:
+                stop_index = entries
+
         n_simulated_events = stop_index - start_index
+        if n_simulated_events <= 0:
+            raise ValueError(
+                "No events selected! Check entry_start, entry_stop and cut_by_eventid."
+            )
 
         # Conversions and parameters to be computed:
         alias = {

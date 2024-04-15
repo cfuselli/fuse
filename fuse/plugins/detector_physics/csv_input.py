@@ -20,7 +20,7 @@ class ChunkCsvInput(FuseBasePlugin):
     """Plugin which reads a CSV file containing instructions for the detector
     physics simulation and returns the data in chunks."""
 
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     depends_on: Tuple = tuple()
     provides = "microphysics_summary"
@@ -34,21 +34,13 @@ class ChunkCsvInput(FuseBasePlugin):
         (("x position of the cluster [cm]", "x"), np.float32),
         (("y position of the cluster [cm]", "y"), np.float32),
         (("z position of the cluster [cm]", "z"), np.float32),
-        (("Number of photons at interaction position.", "photons"), np.int32),
-        (("Number of electrons at interaction position.", "electrons"), np.int32),
-        (("Number of excitons at interaction position.", "excitons"), np.int32),
+        (("Number of photons at interaction position", "photons"), np.int32),
+        (("Number of electrons at interaction position", "electrons"), np.int32),
+        (("Number of excitons at interaction position", "excitons"), np.int32),
         (("Electric field value at the cluster position [V/cm]", "e_field"), np.float32),
         (("Energy of the cluster [keV]", "ed"), np.float32),
         (("NEST interaction type", "nestid"), np.int8),
         (("ID of the cluster", "cluster_id"), np.int32),
-        (
-            ("Time of the interaction [ns]", "t"),
-            np.int64,
-        ),  # Remove them later as they are not in the usual micropyhsics summary
-        (
-            ("Geant4 event ID", "eventid"),
-            np.int32,
-        ),  # Remove them later as they are not in the usual micropyhsics summary
     ]
     dtype = dtype + strax.time_fields
 
@@ -62,15 +54,15 @@ class ChunkCsvInput(FuseBasePlugin):
     separation_scale = straxen.URLConfig(
         default=1e8,
         type=(int, float),
-        help="separation_scale",
+        help="Start a new chunk when the previous cluster is separated by this time scale",
     )
 
     source_rate = straxen.URLConfig(
         default=1,
         type=(int, float),
-        help="Source rate used to generate event times"
-        "Use a value >0 to generate event times in fuse"
-        "Use source_rate = 0 to use event times from the input file (only for csv input)",
+        help="Source rate used to generate event times. "
+        "Use a value >0 to generate event times in fuse. "
+        "Use source_rate = 0 to use event times from the input file (only for csv input).",
     )
 
     n_interactions_per_chunk = straxen.URLConfig(
@@ -96,11 +88,13 @@ class ChunkCsvInput(FuseBasePlugin):
         try:
             chunk_data, chunk_left, chunk_right, source_done = next(self.file_reader_iterator)
             chunk_data["endtime"] = chunk_data["time"]
+            data = np.zeros(len(chunk_data), dtype=self.dtype)
+            strax.copy_to_buffer(chunk_data, data, "_bring_data_into_correct_format")
 
             self.source_done = source_done
 
             return self.chunk(
-                start=chunk_left, end=chunk_right, data=chunk_data, data_type="geant4_interactions"
+                start=chunk_left, end=chunk_right, data=data, data_type="geant4_interactions"
             )
 
         except StopIteration:
@@ -150,9 +144,9 @@ class csv_file_loader:
             (("x position of the cluster [cm]", "x"), np.float32),
             (("y position of the cluster [cm]", "y"), np.float32),
             (("z position of the cluster [cm]", "z"), np.float32),
-            (("Number of photons at interaction position.", "photons"), np.int32),
-            (("Number of electrons at interaction position.", "electrons"), np.int32),
-            (("Number of excitons at interaction position.", "excitons"), np.int32),
+            (("Number of photons at interaction position", "photons"), np.int32),
+            (("Number of electrons at interaction position", "electrons"), np.int32),
+            (("Number of excitons at interaction position", "excitons"), np.int32),
             (("Electric field value at the cluster position [V/cm]", "e_field"), np.float32),
             (("Energy of the cluster [keV]", "ed"), np.float32),
             (("NEST interaction type", "nestid"), np.int8),
@@ -225,7 +219,7 @@ class csv_file_loader:
             chunk_bounds = chunk_end + np.int64(self.chunk_delay_fraction * gap_length)
             self.chunk_bounds = np.append(chunk_start[0] - self.first_chunk_left, chunk_bounds)
         else:
-            log.warning("Only one Chunk! Rate to high?")
+            log.warning("Only one Chunk! Rate too high?")
             self.chunk_bounds = [
                 chunk_start[0] - self.first_chunk_left,
                 chunk_end[0] + self.last_chunk_length,

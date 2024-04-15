@@ -26,7 +26,7 @@ class PMTAfterPulses(FuseBasePlugin):
 
     depends_on = ("propagated_s2_photons", "propagated_s1_photons")
     provides = "pmt_afterpulses"
-    data_kind = "AP_photons"
+    data_kind = "ap_photons"
 
     save_when = strax.SaveWhen.TARGET
 
@@ -72,7 +72,7 @@ class PMTAfterPulses(FuseBasePlugin):
         "&take=pmt_circuit_load_resistor",
         type=(int, float),
         cache=True,
-        help="PMT circuit load resistor",
+        help="PMT circuit load resistor [kg m^2/(s^3 A)]",
     )
 
     digitizer_bits = straxen.URLConfig(
@@ -88,7 +88,7 @@ class PMTAfterPulses(FuseBasePlugin):
         "&take=digitizer_voltage_range",
         type=(int, float),
         cache=True,
-        help="Voltage range of the digitizer boards",
+        help="Voltage range of the digitizer boards [V]",
     )
 
     gain_model_mc = straxen.URLConfig(
@@ -123,13 +123,13 @@ class PMTAfterPulses(FuseBasePlugin):
                 if isinstance(self.uniform_to_pmt_ap[k][q], list):
                     self.uniform_to_pmt_ap[k][q] = np.array(self.uniform_to_pmt_ap[k][q])
 
-    def compute(self, S1_photons, S2_photons):
-        if not self.enable_pmt_afterpulses or (len(S1_photons) == 0 and len(S2_photons) == 0):
+    def compute(self, s1_photons, s2_photons):
+        if not self.enable_pmt_afterpulses or (len(s1_photons) == 0 and len(s2_photons) == 0):
             return np.zeros(0, dtype=self.dtype)
 
-        merged_photons = np.concatenate([S1_photons, S2_photons])
-        S1_photons = None
-        S2_photons = None
+        merged_photons = np.concatenate([s1_photons, s2_photons])
+        s1_photons = None
+        s2_photons = None
 
         # Sort all photons by time
         sortind = np.argsort(merged_photons["time"])

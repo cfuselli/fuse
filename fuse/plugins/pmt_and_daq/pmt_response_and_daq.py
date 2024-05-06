@@ -26,7 +26,7 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
     length (if needed). Finally the data is saved as raw_records.
     """
 
-    __version__ = "0.1.3"
+    __version__ = "0.1.4"
 
     depends_on = ("photon_summary", "pulse_ids", "pulse_windows")
 
@@ -78,7 +78,7 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
         "&take=digitizer_voltage_range",
         type=(int, float),
         cache=True,
-        help="Voltage range of the digitizer boards  [V]",
+        help="Voltage range of the digitizer boards [V]",
     )
 
     noise_data = straxen.URLConfig(
@@ -99,13 +99,13 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
     pe_pulse_ts = straxen.URLConfig(
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=pe_pulse_ts",
         cache=True,
-        help="Add a good description here",
+        help="Time for PMT SPE waveform [sample]",
     )
 
     pe_pulse_ys = straxen.URLConfig(
         default="take://resource://SIMULATION_CONFIG_FILE.json?&fmt=json&take=pe_pulse_ys",
         cache=True,
-        help="Add a good description here",
+        help="Amplitude for PMT SPE waveform [PE/sample]",
     )
 
     pmt_pulse_time_rounding = straxen.URLConfig(
@@ -132,7 +132,7 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
         "&take=samples_before_pulse_center",
         type=(int, float),
         cache=True,
-        help=" Number of samples before the pulse center",
+        help="Number of samples before the pulse center",
     )
 
     digitizer_reference_baseline = straxen.URLConfig(
@@ -164,7 +164,7 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
         "&take=samples_to_store_before",
         type=(int, float),
         cache=True,
-        help=" Number of samples to store before the pulse center",
+        help="Number of samples to store before the pulse center",
     )
 
     special_thresholds = straxen.URLConfig(
@@ -206,9 +206,7 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
         self._pmt_current_templates, _template_length = self.init_pmt_current_templates()
 
         threshold = self.digitizer_reference_baseline - self.zle_threshold - 1
-        self.thresholds = threshold = (
-            np.ones(self.n_tpc_pmts) * threshold
-        )  # put n pmts into config!
+        self.thresholds = threshold = np.ones(self.n_tpc_pmts) * threshold
         for key, value in self.special_thresholds.items():
             if np.int32(key) < self.n_tpc_pmts:
                 self.thresholds[np.int32(key)] = self.digitizer_reference_baseline - value - 1
@@ -250,48 +248,26 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
 
         if n_chunks > 1:
             for pulse_group in pulse_window_chunks[:-1]:
-                # use an upper limit for the waveform buffer
-                length_waveform_buffer = np.int32(
-                    np.sum(np.ceil(pulse_group["length"] / strax.DEFAULT_RECORD_LENGTH))
-                )
-                waveform_buffer = np.zeros(length_waveform_buffer, dtype=self.dtype)
-
-                buffer_level = build_waveform(
-                    pulse_group,
-                    _photons,
-                    unique_photon_pulse_ids,
-                    waveform_buffer,
-                    self.dt,
-                    self._pmt_current_templates,
-                    self.current_2_adc,
-                    self.noise_data["arr_0"],
-                    self.enable_noise,
-                    self.digitizer_reference_baseline,
-                    self.thresholds,
-                    self.trigger_window,
-                )
-
-                records = waveform_buffer[:buffer_level]
-
-                # Digitzier saturation
-                # Clip negative values to 0
-                records["data"][records["data"] < 0] = 0
-
-                records = strax.sort_by_time(records)
-
+                records = self.compute_chunk(_photons, unique_photon_pulse_ids, pulse_group)
                 chunk_end = np.max(strax.endtime(records))
                 chunk = self.chunk(start=last_start, end=chunk_end, data=records)
                 last_start = chunk_end
                 yield chunk
 
         # And the last chunk
+        records = self.compute_chunk(_photons, unique_photon_pulse_ids, pulse_window_chunks[-1])
+        chunk = self.chunk(start=last_start, end=end, data=records)
+        yield chunk
+
+    def compute_chunk(self, _photons, unique_photon_pulse_ids, pulse_group):
+        # use an upper limit for the waveform buffer
         length_waveform_buffer = np.int32(
-            np.sum(np.ceil(pulse_window_chunks[-1]["length"] / strax.DEFAULT_RECORD_LENGTH))
+            np.sum(np.ceil(pulse_group["length"] / strax.DEFAULT_RECORD_LENGTH))
         )
         waveform_buffer = np.zeros(length_waveform_buffer, dtype=self.dtype)
 
         buffer_level = build_waveform(
-            pulse_window_chunks[-1],
+            pulse_group,
             _photons,
             unique_photon_pulse_ids,
             waveform_buffer,
@@ -310,11 +286,9 @@ class PMTResponseAndDAQ(FuseBaseDownChunkingPlugin):
         # Digitzier saturation
         # Clip negative values to 0
         records["data"][records["data"] < 0] = 0
-
         records = strax.sort_by_time(records)
 
-        chunk = self.chunk(start=last_start, end=end, data=records)
-        yield chunk
+        return records
 
     def init_pmt_current_templates(self):
         """Create spe templates, for 10ns sample duration and 1ns rounding we

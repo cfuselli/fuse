@@ -20,22 +20,19 @@ class ElectronTiming(FuseBasePlugin):
     extraction.
     """
 
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
-    depends_on = ("drifted_electrons", "extracted_electrons", "microphysics_summary")
+    depends_on = ("microphysics_summary", "drifted_electrons", "extracted_electrons")
     provides = "electron_time"
     data_kind = "individual_electrons"
 
     save_when = strax.SaveWhen.TARGET
 
-    data_kind = "individual_electrons"
-
     dtype = [
         (("x position of the electron [cm]", "x"), np.float32),
         (("y position of the electron [cm]", "y"), np.float32),
         (("ID of the cluster creating the electron", "cluster_id"), np.int32),
-    ]
-    dtype = dtype + strax.time_fields
+    ] + strax.time_fields
 
     # Config options
     electron_trapping_time = straxen.URLConfig(

@@ -5,6 +5,7 @@ import nestpy
 import strax
 import straxen
 
+from ...dtypes import propagated_photons_fields
 from ...common import pmt_gains, build_photon_propagation_output
 from ...common import (
     init_spe_scaling_factor_distributions,
@@ -32,22 +33,15 @@ class S1PhotonPropagationBase(FuseBasePlugin):
     Note: The timing calculation is defined in the child plugin.
     """
 
-    __version__ = "0.3.0"
+    __version__ = "0.3.2"
 
-    depends_on = ("s1_photons", "microphysics_summary")
+    depends_on = ("microphysics_summary", "s1_photon_hits")
     provides = "propagated_s1_photons"
-    data_kind = "S1_photons"
+    data_kind = "s1_photons"
 
     save_when = strax.SaveWhen.TARGET
 
-    dtype = [
-        (("PMT channel of the photon", "channel"), np.int16),
-        (("Photon creates a double photo-electron emission", "dpe"), np.bool_),
-        (("Sampled PMT gain for the photon", "photon_gain"), np.int32),
-        (("ID of the cluster creating the photon", "cluster_id"), np.int32),
-        (("Type of the photon. S1 (1), S2 (2) or PMT AP (0)", "photon_type"), np.int8),
-    ]
-    dtype = dtype + strax.time_fields
+    dtype = propagated_photons_fields + strax.time_fields
 
     # Config options shared by S1 and S2 simulation
     p_double_pe_emision = straxen.URLConfig(
@@ -140,7 +134,7 @@ class S1PhotonPropagationBase(FuseBasePlugin):
     def setup(self):
         super().setup()
 
-        if self.deterministic_seed:
+        if self.deterministic_seed or (self.user_defined_random_seed is not None):
             # Dont know but nestpy seems to have a problem with large seeds
             self.short_seed = int(repr(self.seed)[-8:])
             log.debug(f"Generating nestpy random numbers from seed {self.short_seed}")
@@ -291,7 +285,7 @@ class S1PhotonPropagation(S1PhotonPropagationBase):
         "&fmt=json.gz"
         "&method=RegularGridInterpolator",
         cache=True,
-        help="Spline for the optical propagation",
+        help="Spline for the optical propagation of S1 signals",
     )
 
     def setup(self):

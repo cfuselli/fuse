@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import straxen
 
+from ...dtypes import electric_fields
 from ...plugin import FuseBasePlugin
 
 export, __all__ = strax.exporter()
@@ -18,22 +19,19 @@ class ElectricField(FuseBasePlugin):
 
     __version__ = "0.2.2"
 
-    depends_on = ("interactions_in_roi",)
+    depends_on = "interactions_in_roi"
     provides = "electric_field_values"
     data_kind = "interactions_in_roi"
 
     save_when = strax.SaveWhen.TARGET
 
-    dtype = [
-        (("Electric field value at the cluster position [V/cm]", "e_field"), np.float32),
-        *strax.time_fields,
-    ]
+    dtype = electric_fields + strax.time_fields
 
     # Config options
-    # Field map not yet in simulation config file!
     efield_map = straxen.URLConfig(
-        default="itp_map://resource://"
-        "fieldmap_2D_B2d75n_C2d75n_G0d3p_A4d9p_T0d9n_PMTs1d3n_FSR0d65p_QPTFE_0d5n_0d4p.json.gz?"
+        default="itp_map://resource://simulation_config://"
+        "SIMULATION_CONFIG_FILE.json?"
+        "&key=efield_map"
         "&fmt=json.gz"
         "&method=RegularGridInterpolator",
         cache=True,
